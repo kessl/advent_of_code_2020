@@ -9,7 +9,9 @@ type Ticket = Vec<u32>;
 #[derive(Debug)]
 pub struct TicketValidator {
     rules: Rules,
+    ticket: Ticket,
     nearby_tickets: Vec<Ticket>,
+    fields: Vec<Vec<String>>,
 }
 
 impl TicketValidator {
@@ -18,36 +20,79 @@ impl TicketValidator {
         let mut sections = file.split("\n\n");
 
         let rules = Self::parse_rules(sections.next().ok_or("Missing rules section")?)?;
-        let _ticket = sections.next(); // TODO
+        let ticket = Self::parse_tickets(sections.next().ok_or("Missing your ticket section")?)?
+            .into_iter()
+            .nth(0)
+            .ok_or("Missing ticket")?;
         let nearby_tickets =
             Self::parse_tickets(sections.next().ok_or("Missing nearby tickets section")?)?;
 
         Ok(Self {
+            fields: std::iter::repeat_with(|| vec![])
+                .take(rules.len())
+                .collect(),
             rules,
+            ticket,
             nearby_tickets,
         })
     }
 
-    // find tickets with values that don't match any rules
-    pub fn find_invalid_values(&self) -> Vec<u32> {
-        let mut invalid = vec![];
+    pub fn name_fields(&mut self, tickets: &Vec<Ticket>) {
+        // find fields that fit rules for each slot
+        for (name, (range1, range2)) in self.rules.iter() {
+            for i in 0..self.rules.len() {
+                let mut fits = true;
 
-        for ticket in &self.nearby_tickets {
-            for field in ticket {
-                let mut valid = false;
-                for (range1, range2) in self.rules.values() {
-                    if range1.contains(field) || range2.contains(field) {
-                        valid = true;
+                for ticket in tickets {
+                    if !range1.contains(&ticket[i]) && !range2.contains(&ticket[i]) {
+                        fits = false;
                         break;
                     }
                 }
-                if !valid {
-                    invalid.push(*field);
+
+                if fits {
+                    self.fields.get_mut(i).unwrap().push(name.to_string());
                 }
             }
         }
 
-        invalid
+        // eliminiate field names used elsewhere
+        for _ in 0..self.rules.len() {
+            for i in 0..self.rules.len() {
+                let fields = self.fields.get(i).unwrap();
+                let len = fields.len();
+                let value = fields[0].to_string();
+    
+                if len == 1 {
+                    for j in 0..self.fields.len() {
+                        if i == j {
+                            continue;
+                        };
+                        let options = self.fields.get_mut(j).unwrap();
+                        options.retain(|option| option != &value);
+                    }
+                }
+            }
+        }
+
+        for (index, field) in self.fields.iter().enumerate() {
+            println!("{}: {:?}: {}", index, field[0], self.ticket.get(index).unwrap());
+        }
+    }
+
+    pub fn find_valid(&self) -> Vec<Ticket> {
+        // filter tickets, whose fields all match any rule
+        self.nearby_tickets
+            .iter()
+            .filter(|ticket| {
+                ticket.iter().all(|field| {
+                    self.rules
+                        .values()
+                        .any(|(range1, range2)| range1.contains(field) || range2.contains(field))
+                })
+            })
+            .map(|ticket| ticket.clone())
+            .collect()
     }
 
     fn parse_rules(rules: &str) -> Result<Rules, Error> {
